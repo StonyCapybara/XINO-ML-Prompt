@@ -1,288 +1,315 @@
-"""
-================================================================================
-TETRIS BOT - ML CHALLENGE
-================================================================================
+# paste this in place of your previous version
 
-OBJECTIVE:
-----------
-Build an ML/AI bot that plays Tetris by implementing the `decide()` method below.
-Your bot will receive game state information and must return the action to take.
+from typing import List, Tuple, Optional
+from copy import deepcopy
+from math import inf
 
-HOW IT WORKS:
--------------
-1. The game calls `bot.decide(obs)` approximately every 120ms (8-9 times per second)
-2. Your bot receives a dictionary (`obs`) containing complete game state
-3. You analyze the state and return one action string
-4. The game executes your action and continues
+# --- El-Tetris weights (canonical) ---
+WEIGHTS = {
+    "landing_height": -4.500158825082766,
+    "rows_eliminated":  3.4181268101392694,
+    "row_transitions": -3.2178882868487753,
+    "col_transitions": -9.348695305445199,
+    "holes": -7.899265427351652,
+    "well_sums": -3.3855972247263626,
+}
 
-IMPORTS YOU MIGHT NEED:
------------------------
-"""
-from __future__ import annotations
-from typing import Optional, List, Dict, Any
+# ----------------- Grid helpers -----------------
+def copy_grid(grid):
+    return [row[:] for row in grid]
 
-# Add your imports here (numpy, tensorflow, pytorch, etc.)
-# import numpy as np
-# import torch
-# from your_model import YourModel
+def collides(grid, cells: List[Tuple[int,int]]) -> bool:
+    for row, col in cells:
+        newrow = row+1
+        if newrow >= 19:
+            return True
+        if grid[newrow][col] != 0 and grid[newrow][col] != grid[row][col]:
+            return True
+    return False
 
-
-"""
-================================================================================
-IMPLEMENT YOUR BOT HERE
-================================================================================
-"""
-
-
-class Bot:
+def place_piece(grid: List[List[int]], cells: List[Tuple[int,int]], val: int = 1) -> Optional[List[List[int]]]:
     """
-    Your Tetris Bot Implementation.
-    
-    Initialize your model, load weights, set up any required state in __init__().
-    Implement your decision logic in the decide() method.
+    Return a new grid with piece placed, or None if placement invalid (out-of-bounds or overlap).
     """
-    
-    def __init__(self) -> None:
-        """
-        Initialize your bot here.
-        
-        Examples:
-        ---------
-        # Load a trained model
-        # self.model = YourModel()
-        # self.model.load_weights('model.pth')
-        
-        # Initialize any state tracking
-        # self.move_history = []
-        # self.strategy = "aggressive"
-        """
-        pass  # Replace with your initialization code
+    g = copy_grid(grid)
+    n_rows = len(g)
+    n_cols = len(g[0])
 
-    def decide(self, obs: Optional[dict]) -> Optional[str]:
-        """
-        ====================================================================
-        MAIN DECISION FUNCTION - IMPLEMENT YOUR BOT LOGIC HERE
-        ====================================================================
-        
-        This method is called every ~120ms during gameplay.
-        Analyze the game state and return the action you want to take.
-        
-        PARAMETERS:
-        -----------
-        obs : dict or None
-            Game state observation dictionary (see structure below)
-            Will be None if game state is unavailable (rare)
-        
-        RETURNS:
-        --------
-        str or None
-            One of the following action strings:
-            - 'w'  : Rotate piece clockwise
-            - 'a'  : Move piece left
-            - 's'  : Soft drop (move down faster)
-            - 'd'  : Move piece right
-            - ' '  : Hard drop (instant drop to bottom)
-            - None : Do nothing this frame
-        
-        ====================================================================
-        GAME STATE STRUCTURE (obs dictionary):
-        ====================================================================
-        
-        obs = {
-            "grid": List[List[int]],        # The game board
-            "current_piece": dict,          # Currently falling piece
-            "next_piece": dict,             # Next piece in queue
-            "level": int                    # Current difficulty level
-        }
-        
-        --------------------------------------------------------------------
-        1. GRID (obs["grid"])
-        --------------------------------------------------------------------
-        A 20x10 matrix representing the game board (20 rows, 10 columns).
-        - Index [0][0] is top-left corner
-        - Index [19][9] is bottom-right corner
-        - Values:
-            0 = Empty cell
-            1-7 = Occupied cell (different colors/piece types)
-        
-        Example access:
-            grid = obs["grid"]
-            top_row = grid[0]           # First row (list of 10 values)
-            bottom_row = grid[19]       # Last row
-            cell = grid[row][col]       # Individual cell value
-            
-        Example usage:
-            # Check if bottom row is full
-            if all(cell != 0 for cell in grid[19]):
-                return ' '  # Hard drop!
-                
-            # Count empty cells in column 5
-            empty_in_col5 = sum(1 for row in grid if row[5] == 0)
-        
-        --------------------------------------------------------------------
-        2. CURRENT PIECE (obs["current_piece"])
-        --------------------------------------------------------------------
-        The piece currently falling. None if no piece is active.
-        
-        Structure:
-            {
-                "type": int,            # Piece type (0-6)
-                                        # 0=I, 1=O, 2=T, 3=S, 4=Z, 5=J, 6=L
-                
-                "x": int,               # Column position (0-9)
-                "y": int,               # Row position (0-19)
-                
-                "rotation": int,        # Rotation state (0-3)
-                                        # 0=0°, 1=90°, 2=180°, 3=270°
-                
-                "color": int,           # Color code (1-7)
-                
-                "cells": List[tuple]    # Occupied cells as (row, col) pairs
-                                        # Example: [(5,3), (5,4), (6,3), (6,4)]
-            }
-        
-        Example usage:
-            current = obs["current_piece"]
-            if current is not None:
-                # Check if piece is in danger zone (top rows)
-                if current["y"] < 5:
-                    return ' '  # Drop it fast!
-                
-                # Check if piece is too far right
-                if current["x"] > 6:
-                    return 'a'  # Move left
-                
-                # Rotate if it's an I-piece
-                if current["type"] == 0:
-                    return 'w'
-        
-        --------------------------------------------------------------------
-        3. NEXT PIECE (obs["next_piece"])
-        --------------------------------------------------------------------
-        The next piece that will appear after current piece is placed.
-        Useful for planning ahead!
-        
-        Structure:
-            {
-                "type": int,            # Piece type (0-6)
-                "rotation": int,        # Initial rotation (usually 0)
-                "color": int            # Color code (1-7)
-            }
-        
-        Example usage:
-            next_p = obs["next_piece"]
-            if next_p["type"] == 0:  # Next is I-piece
-                # Save space for vertical placement
-                return 'd'  # Move to right side
-        
-        --------------------------------------------------------------------
-        4. LEVEL (obs["level"])
-        --------------------------------------------------------------------
-        Current game level (difficulty increases with level).
-        Higher levels = pieces fall faster
-        
-        Example usage:
-            if obs["level"] > 5:
-                # High speed - make quick decisions
-                return ' '  # Hard drop
-        
-        ====================================================================
-        EXAMPLE IMPLEMENTATIONS:
-        ====================================================================
-        
-        Example 1: Simple rule-based bot
-        ---------------------------------
-        def decide(self, obs):
-            if obs is None:
-                return None
-            
-            current = obs["current_piece"]
-            if current is None:
-                return None
-            
-            # Move pieces to the left side
-            if current["x"] > 3:
-                return 'a'
-            
-            # Drop when in position
-            return ' '
-        
-        Example 2: Grid analysis bot
-        -----------------------------
-        def decide(self, obs):
-            if obs is None:
-                return None
-            
-            grid = obs["grid"]
-            current = obs["current_piece"]
-            
-            # Find the emptiest column
-            col_heights = []
-            for col in range(10):
-                height = sum(1 for row in range(20) if grid[row][col] != 0)
-                col_heights.append(height)
-            
-            best_col = col_heights.index(min(col_heights))
-            
-            # Move toward the best column
-            if current["x"] < best_col:
-                return 'd'
-            elif current["x"] > best_col:
-                return 'a'
-            else:
-                return ' '  # Drop!
-        
-        Example 3: ML model bot
-        -----------------------
-        def decide(self, obs):
-            if obs is None:
-                return None
-            
-            # Convert grid to numpy array
-            grid_array = np.array(obs["grid"])
-            
-            # Get model prediction
-            action_probs = self.model.predict(grid_array)
-            action_idx = np.argmax(action_probs)
-            
-            # Map to action
-            actions = ['w', 'a', 's', 'd', ' ', None]
-            return actions[action_idx]
-        
-        ====================================================================
-        TIPS & STRATEGIES:
-        ====================================================================
-        
-        1. Start Simple: Begin with basic rules before adding ML
-        2. Test Incrementally: Print debug info to see what's happening
-        3. Consider Speed: Your code runs every ~120ms, keep it fast
-        4. Plan Ahead: Use next_piece to inform your strategy
-        5. Avoid Gaps: Try to minimize holes in your grid
-        6. Clear Lines: Prioritize completing rows when possible
-        7. Think Vertical: Keep some columns clear for I-pieces
-        
-        ====================================================================
-        """
-        
-        # Safety check
-        if obs is None:
+    for r, c in cells:
+        if r < 0 or r >= n_rows or c < 0 or c >= n_cols:
             return None
-        
-        # ================================================================
-        # IMPLEMENT YOUR BOT LOGIC BELOW THIS LINE
-        # ================================================================
-        
-        # Extract game state components
-        grid = obs["grid"]                    # 20x10 board
-        current_piece = obs["current_piece"]  # Currently falling piece
-        next_piece = obs["next_piece"]        # Next piece coming
-        level = obs["level"]                  # Current difficulty
-        
-        # TODO: Add your decision logic here
-        # Example: return 'a' to move left, 'd' to move right, etc.
-        
-        return None  # Replace with your logic
-        
-        # ================================================================
-        # END OF YOUR IMPLEMENTATION
-        # ================================================================
+        if g[r][c] != 0:
+            return None
+
+    for r, c in cells:
+        g[r][c] = val
+    return g
+
+def clear_full_lines(grid: List[List[int]]) -> Tuple[List[List[int]], List[int]]:
+    """
+    Remove full rows from `grid` and return (new_grid, cleared_rows).
+    - grid: list of rows (top row first). 0 == empty, !=0 == filled.
+    - new_grid: same shape as input (padded with empty rows on top).
+    - cleared_rows: list of original row indices (0-based, top=0) that were cleared.
+    """
+    if not grid:
+        return [], []
+
+    n_rows = len(grid)
+    n_cols = len(grid[0])
+
+    new_rows: List[List[int]] = []
+    cleared_rows: List[int] = []
+
+    # Single pass: collect non-full rows and record full row indices
+    for i, row in enumerate(grid):
+        if all(cell != 0 for cell in row):
+            cleared_rows.append(i)
+        else:
+            # copy row to avoid aliasing original grid rows
+            new_rows.append(row.copy())
+
+    if cleared_rows:
+        # prepend the same number of empty rows at the top
+        empty_rows = [[0] * n_cols for _ in range(len(cleared_rows))]
+        new_grid = empty_rows + new_rows
+    else:
+        # no change, but return copies (defensive)
+        new_grid = [row.copy() for row in grid]
+
+    return new_grid, cleared_rows
+
+# --------------- Feature calculators ----------------
+def landing_height_avg(placed_cells):
+    if not placed_cells:
+        return 0.0
+    return sum(r for r, _ in placed_cells) / len(placed_cells)
+
+def rows_eliminated_feature(placed_cells, cleared_rows):
+    e = len(cleared_rows)
+    if e == 0:
+        return 0
+    cleared_set = set(cleared_rows)
+    b = sum(1 for r, _ in placed_cells if r in cleared_set)
+    return e * b
+
+def row_transitions(grid):
+    transitions = 0
+    for row in grid:
+        prev = 0
+        for cell in row:
+            curr = 1 if cell != 0 else 0
+            if curr != prev:
+                transitions += 1
+            prev = curr
+        if prev == 1:
+            transitions += 1
+    return transitions
+
+def column_transitions(grid):
+    transitions = 0
+    n_rows = len(grid)
+    n_cols = len(grid[0])
+
+    for c in range(n_cols):
+        prev = 0
+        for r in range(n_rows):
+            curr = 1 if grid[r][c] != 0 else 0
+            if curr != prev:
+                transitions += 1
+            prev = curr
+        if prev == 1:
+            transitions += 1
+
+    return transitions
+
+def holes(grid):
+    count = 0
+    n_rows = len(grid)
+    n_cols = len(grid[0])
+
+    for c in range(n_cols):
+        filled_seen = False
+        for r in range(n_rows):
+            if grid[r][c] != 0:
+                filled_seen = True
+            elif grid[r][c] == 0 and filled_seen:
+                count += 1
+    return count
+
+def well_sums(grid):
+    if not grid or not grid[0]:
+        return 0
+
+    n_rows = len(grid)
+    n_cols = len(grid[0])
+    total = 0
+
+    for c in range(n_cols):
+        well_depth = 0
+        for r in range(n_rows):
+            cell_empty = (grid[r][c] == 0)
+            left_filled = (c == 0) or (grid[r][c - 1] != 0)
+            right_filled = (c == n_cols - 1) or (grid[r][c + 1] != 0)
+
+            if cell_empty and left_filled and right_filled:
+                well_depth += 1
+                total += well_depth
+            else:
+                well_depth = 0
+
+    return total
+
+def evaluate_eltetris(grid_after, placed_cells, cleared_rows):
+    fh = landing_height_avg(placed_cells)
+    f2 = rows_eliminated_feature(placed_cells, cleared_rows)
+    f3 = row_transitions(grid_after)
+    f4 = column_transitions(grid_after)
+    f5 = holes(grid_after)
+    f6 = well_sums(grid_after)
+    score = (WEIGHTS["landing_height"] * fh
+             + WEIGHTS["rows_eliminated"] * f2
+             + WEIGHTS["row_transitions"] * f3
+             + WEIGHTS["col_transitions"] * f4
+             + WEIGHTS["holes"] * f5
+             + WEIGHTS["well_sums"] * f6)
+    print(score)
+    return score
+
+# ------------- Piece rotation helpers -------------
+def normalize_cells(cells: List[Tuple[int,int]]) -> List[Tuple[int,int]]:
+    if not cells:
+        return []
+    min_r = min(r for r, _ in cells)
+    min_c = min(c for _, c in cells)
+    return sorted(((r - min_r, c - min_c) for r, c in cells))
+
+def rotate90_cells(cells: List[Tuple[int,int]]) -> List[Tuple[int,int]]:
+    rotated = [(c, -r) for r, c in cells]
+    min_r = min(r for r, _ in rotated)
+    min_c = min(c for _, c in rotated)
+    return sorted(((r - min_r, c - min_c) for r, c in rotated))
+
+def generate_rotations_from_cells(cells: List[Tuple[int,int]]) -> List[List[Tuple[int,int]]]:
+    rots = []
+    cur = normalize_cells(cells)
+    for _ in range(4):
+        if cur not in rots:
+            rots.append(cur)
+        cur = rotate90_cells(cur)
+    return rots
+
+def ensure_relative_shape(cells: List[Tuple[int,int]]) -> List[Tuple[int,int]]:
+    """If cells appear absolute (large row indices), convert to relative by shifting min row/col to 0."""
+    if not cells:
+        return []
+    min_r = min(r for r, _ in cells)
+    min_c = min(c for _, c in cells)
+    return sorted(((r - min_r, c - min_c) for r, c in cells))
+
+# -------------- Placement enumeration & simulation ----------------
+def enumerate_final_placements(grid, piece, rotations = None):
+    n_rows = len(grid)
+    n_cols = len(grid[0])
+
+    # build rotations only if not provided
+    if rotations is None:
+        if "rotations" in piece and piece["rotations"]:
+            rotations = [normalize_cells(rot) for rot in piece["rotations"]]
+        else:
+            base_cells = piece.get("cells", [])
+            base_cells = ensure_relative_shape(base_cells)
+            rotations = generate_rotations_from_cells(base_cells)
+
+    placements = []
+    for rot_idx, rot in enumerate(rotations):
+        max_r = max(r for r, _ in rot)
+        max_c = max(c for _, c in rot)
+        min_x = 0
+        max_x = n_cols - (max_c + 1)
+        for x in range(min_x, max_x + 1):
+            drop = 0
+            while True:
+                test_cells = [(r + drop + 1, c + x) for r, c in rot]
+                if collides(grid, test_cells):
+                    break
+                drop += 1
+                if drop > n_rows:
+                    break
+            placed_cells = [(r + drop, c + x) for r, c in rot]
+            if collides(grid, placed_cells):
+                continue
+            new_grid = place_piece(grid, placed_cells, val=1)
+            new_grid, cleared_rows = clear_full_lines(new_grid)
+            score = evaluate_eltetris(new_grid, placed_cells, cleared_rows)
+            placements.append((rot_idx, rot, x, placed_cells, new_grid, cleared_rows, score))
+    return placements
+
+# -------------- Action planner ----------------
+def compute_first_action(obs, target_rot_idx, target_x, rotations):
+    piece = obs["current_piece"]
+    curr_rot_idx = None
+    curr_x = None
+
+    if "rotation" in piece:
+        curr_rot_idx = piece["rotation"]
+    if "x" in piece:
+        curr_x = piece["x"]
+
+    if curr_x is None and "cells" in piece:
+        cells = piece["cells"]
+        try:
+            curr_x = min(c for r, c in cells)
+        except Exception:
+            curr_x = None
+
+    if curr_rot_idx is None and "cells" in piece:
+        cur_cells = piece["cells"]
+        try:
+            rel = ensure_relative_shape(cur_cells)
+            for i, rot in enumerate(rotations):
+                if rel == rot:
+                    curr_rot_idx = i
+                    break
+        except Exception:
+            curr_rot_idx = None
+
+    if curr_x is None or curr_rot_idx is None:
+        return ' '
+
+    if curr_rot_idx != target_rot_idx:
+        return 'w'
+    if curr_x > target_x:
+        return 'a'
+    if curr_x < target_x:
+        return 'd'
+    return ' '
+
+# ----------------- Main Bot class --------------------
+class Bot:
+    def __init__(self) -> None:
+        # any initialization/state goes here
+        pass
+
+    def decide(self, obs: dict):
+        grid = obs["grid"]
+        piece = obs["current_piece"]
+
+        # compute rotations once and pass them through
+        if "rotations" in piece and piece["rotations"]:
+            rotations = [normalize_cells(rot) for rot in piece["rotations"]]
+        else:
+            base_cells = piece.get("cells", [])
+            base_cells = ensure_relative_shape(base_cells)
+            rotations = generate_rotations_from_cells(base_cells)
+
+        placements = enumerate_final_placements(grid, piece, rotations)
+        if not placements:
+            return None
+
+        best = max(placements, key=lambda t: t[-1])
+        best_rot_idx, best_rot, best_x, _, _, _, _ = best
+
+        action = compute_first_action(obs, best_rot_idx, best_x, rotations)
+        return action
+        # print(collides(grid, piece["cells"]))
